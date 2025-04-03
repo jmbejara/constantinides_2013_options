@@ -61,7 +61,9 @@ def sql_query(year = 1996, start = '1996-01-01', end = '2012-01-31'):
 			b.secid, b.date,  
 			b.open, b.close, 
 			a.cp_flag, 
-			a.exdate, a.impl_volatility, c.tb_m3, a.volume, a.open_interest,
+			a.exdate, a.impl_volatility, 
+			c.dtb3 as tb_m3, 
+			a.volume, a.open_interest,
 			a.best_bid, a.best_offer, a.strike_price, a.contract_size
 		FROM
 			optionm_all.opprcd{year} AS a

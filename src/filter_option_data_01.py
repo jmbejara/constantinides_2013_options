@@ -80,7 +80,13 @@ def delete_identical_but_price_filter(df):
 
 	#in the money neighbors: 
 	m1 = df_Neigh.groupby(by = huntlist).apply(lambda x: ((x['mnyns']-1)**2).idxmin())
-	dMon = df_Neigh.loc[m1]
+	valid_indices = m1.dropna().astype(int).values # Drop NaN, ensure int type, get numpy array
+	
+	# Reshape if it's empty and 2D
+	if valid_indices.ndim == 2 and valid_indices.shape[0] == 0:
+		valid_indices = valid_indices.reshape(-1) # Reshape to 1D
+
+	dMon = df_Neigh.loc[valid_indices]
 
 	###NEED IMPLIED VOLATILITIES TO BE CALCULATED 
 	dMon['mon_vola'] = dMon['impl_volatility']
@@ -115,8 +121,13 @@ def delete_identical_but_price_filter(df):
 	# df_Join[['impl_volatility', 'impl_volatility2']]
 
 	#findimplied volatility being closest to ITM: 
-	idx_keep = df_Join.groupby(by = huntlist).apply(lambda x: ((x['impl_volatility2']-x['mon_vola']).abs()).idxmin())
+	idx_keep_series = df_Join.groupby(by = huntlist).apply(lambda x: ((x['impl_volatility2']-x['mon_vola']).abs()).idxmin())
 	#df_Join[df_Join['mon_vola'].isna()]
+	idx_keep = idx_keep_series.dropna().astype(int).values # Drop NaN, ensure int, get numpy array
+	
+	# Reshape if it's empty and 2D (less likely here, but good practice)
+	if idx_keep.ndim == 2 and idx_keep.shape[0] == 0:
+		idx_keep = idx_keep.reshape(-1) # Reshape to 1D
 
 	#Tidy up the reduced subset of duplicates
 	df_reduced= df_Join.loc[idx_keep]
