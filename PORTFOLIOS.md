@@ -1,3 +1,79 @@
+### SPX Option Portfolio Construction Process
+
+1. Utilize 3-tiered options data filtration process outlined in *Constantinides, Jackwerth, Savov (2013)* ("**CJS**").
+
+2. Construct option portfolios using the process outlined in *He, Kelly, Manela (2017)* ("**HKM**").
+
+
+
+## SPX Option Portfolio Construction — Work Process
+
+### Step 1: Data
+- SPX index options data from WRDS / OptionMetrics:
+    -- Do we want this code to be flexible to any timeframe? 
+    -- Do we ignore the time period replication issues raised in the final project last year? 
+- Required fields: strike, maturity, bid/ask, implied vol, underlying index level, option type (call/put)
+
+---
+
+### Step 2: Data Filtering (per Constantinides, Jackwerth, Savov 2013)
+- Apply 3-step filtration process:
+  1. Retain only reliable quotes based on bid-ask and quote conditions
+  2. Apply stricter filters to the buy-side of the market
+  3. For missing quotes:
+     - Use raw quote if available
+     - Use payoff if expiration is near
+     - Otherwise interpolate **implied vol** using fitted surface and reconstruct price
+
+---
+
+### Step 3: Define Portfolio Bins
+- Create 54 distinct portfolios (***or 18 per HKM??***):
+  - 9 moneyness bins: [0.90, 0.925, ..., 1.10]
+  - 3 time-to-maturity buckets: 30, 60, 90 days
+  - 2 option types: call and put
+
+---
+
+### Step 4: Return Computation (per He, Kelly, Manela 2017)
+- For each option in each portfolio:
+  - Compute one-day arithmetic return using midpoint of bid-ask
+  - Apply leverage adjustment to achieve beta = 1 using Black-Scholes elasticity:
+    - Call: $\frac{\partial C}{\partial S} \cdot \frac{S}{C} > 1$
+    - Put: $\frac{\partial P}{\partial S} \cdot \frac{S}{P} < -1$
+  - Hold fractional option positions; invest remaining capital in the risk-free asset
+
+---
+
+### Step 5: Weighting and Cleaning
+- No kernel smoothing is applied (unlike Constantinides et al.)
+- Use filtered options only
+- Interpolate implied vol surface as needed for missing contracts
+- If price still missing, carry forward last known price and rescale weights
+
+---
+
+### Step 6: Aggregation and Output -- DISCUSS
+- Compute leverage-adjusted returns daily
+- Compound daily returns into monthly returns per portfolio
+- Optional: collapse 54 portfolios into 18 by averaging over maturities for each moneyness and option type
+
+---
+
+### Step 7: Panel Data Formatting -- DISCUSS
+- Structure final dataset as panel data:
+  - Dimensions: Date × Portfolio ID
+  - Variables: return, moneyness, maturity, option type
+
+---
+
+### Step 8: Downstream Use ??
+- Use portfolio returns in cross-sectional asset pricing models
+- Compatible with Fama-MacBeth regressions and intermediary factor models
+
+
+---
+
 ### Portfolio Construction in He, Kelly, Manela (2017)
 
 #### 1. Objective
@@ -99,5 +175,4 @@ To create representative test portfolios across various asset classes (including
 - This process significantly reduces skewness and kurtosis, enabling:
   - Application of linear factor pricing models  
   - Direct comparison with models using Fama-French 25 portfolios
-
 
