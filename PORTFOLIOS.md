@@ -1,4 +1,44 @@
-### **Portfolio Structure**
+### Portfolio Construction in He, Kelly, Manela (2017)
+
+#### 1. Objective
+To create representative test portfolios across various asset classes (including options), enabling cross-sectional asset pricing tests of intermediary capital risk.
+
+---
+
+#### 2. Option Portfolio Structure
+- **54 portfolios**: S&P 500 index options, sorted by:
+  - **Moneyness (strike/index)**: 9 levels  
+  - **Maturity**: 30, 60, or 90 days  
+  - **Type**: Separate portfolios for **calls** and **puts**
+- **Final form for testing**: HKM reduced the 54 to **18 portfolios** by averaging across maturities with the same moneyness.
+
+---
+
+#### 3. Return Computation
+- **Daily arithmetic return**, based on the **midpoint of bid-ask prices**
+- **Leverage-adjusted** to achieve a **market beta of 1** using Black-Scholes **elasticity**:
+  - Call elasticity = $\frac{\partial C}{\partial S} \cdot \frac{S}{C} > 1$  
+  - Put elasticity = $\frac{\partial P}{\partial S} \cdot \frac{S}{P} < -1$
+- Fractional option holdings + remainder in **risk-free asset**
+
+---
+
+#### 4. Weighting and Cleaning
+- No **kernel weighting** like Constantinides et al.
+- Use of **filtered data** with interpolated **implied volatility surface**
+- **Missing data** handled via interpolation or holding asset at previous price
+
+---
+
+#### 5. Aggregation
+- Daily leverage-adjusted returns → **monthly compounded returns**
+- Each
+
+
+----
+
+
+### **Portfolio Construction in Constantinides (2013)**
 - **Number of Portfolios**: 54 total, split into:
   - 27 call option portfolios  
   - 27 put option portfolios
@@ -59,3 +99,5 @@
 - This process significantly reduces skewness and kurtosis, enabling:
   - Application of linear factor pricing models  
   - Direct comparison with models using Fama-French 25 portfolios
+
+
