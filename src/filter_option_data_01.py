@@ -46,7 +46,7 @@ def calc_moneyness(df):
 
 def delete_identical_filter(df):
 	""" Helper function to delete identical options from the dataframe
-		Remove identical options (type, strike, experiation date, price)
+		Remove identical options (type, strike, expiration date, price)
 	"""
 	columns_to_check = ['secid', 'cp_flag', 'strike_price','date', 'exdate', 'best_offer']
 	df = df.drop_duplicates(subset=columns_to_check, keep='first')
