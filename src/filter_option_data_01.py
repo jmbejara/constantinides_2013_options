@@ -46,7 +46,8 @@ def calc_moneyness(df):
 
 def delete_identical_filter(df):
 	""" Helper function to delete identical options from the dataframe
-		Remove identical options (type, strike, expiration date, price)
+		Remove identical options (type, strike, expiration date, price). Filter is applied to the buyside/offer/ask side of the market
+		to minimize risk of entering a position and not being able to exit. 
 	"""
 	columns_to_check = ['secid', 'cp_flag', 'strike_price','date', 'exdate', 'best_offer']
 	df = df.drop_duplicates(subset=columns_to_check, keep='first')
@@ -79,7 +80,7 @@ def delete_identical_but_price_filter(df):
 	df_Neigh = df_Neigh.reset_index(drop =True)
 
 	#in the money neighbors: 
-	m1 = df_Neigh.groupby(by = huntlist).apply(lambda x: ((x['mnyns']-1)**2).idxmin())
+	m1 = df_Neigh.groupby(by = huntlist).apply(lambda x: ((x['moneyness']-1)**2).idxmin())
 	valid_indices = m1.dropna().astype(int).values # Drop NaN, ensure int type, get numpy array
 	
 	# Reshape if it's empty and 2D
