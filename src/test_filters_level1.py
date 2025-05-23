@@ -57,8 +57,8 @@ df['volume'] = [1]*7 + [0]*3
 df['best_bid'] = [0]*4 + [1]*6
 
 df['name'] = ['i1', 'i2', 'di1', 'di2', 'di3', 'di4'] + ['vb']*4
-i = f1.delete_identical_filter(df)
-di = f1.delete_identical_but_price_filter(i)
+i = f1.identical_filter(df)
+di = f1.identical_but_price_filter(i)
 zb = f1.delete_zero_bid_filter(di)
 zv = f1.delete_zero_volume_filter(zb)
 

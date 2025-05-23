@@ -44,7 +44,7 @@ def calc_moneyness(df):
 	df['moneyness'] = df['strike_price']/df['close']
 	return df
 
-def delete_identical_filter(df):
+def identical_filter(df):
 	""" Helper function to delete identical options from the dataframe
 		Remove identical options (type, strike, expiration date, price). Filter is applied to the buyside/offer/ask side of the market
 		to minimize risk of entering a position and not being able to exit. 
@@ -53,93 +53,51 @@ def delete_identical_filter(df):
 	df = df.drop_duplicates(subset=columns_to_check, keep='first')
 	return df	
 
-def delete_identical_but_price_filter(df): 
-	""" Helper function to delete identical options from the dataframe
-		Remove identical options (type, strike, expiration date) but different prices
-	"""
-	#some are identical (type, strike, maturity, date) but different prices. 
-	#KEEP closest to TBill based implied volatility of moneyness neighbors 
-	#delete others 
 
-	#Get Bools of duplicated row: 
-	bool_Dup = df.duplicated(subset = ['secid', 'date', 'cp_flag', 'strike_price', 'exdate'], keep = False)
+def identical_but_price_filter(df):
+    """
+    Vectorized version of identical_but_price_filter.
+    Removes duplicate options (same secid, date, cp_flag, strike_price, exdate) but different prices.
+    Keeps the quote whose IV is closest to the implied volatility of the moneyness-nearest neighbor.
+    """
 
-	#remove duplicated 
-	df_noDup = df[~bool_Dup]
+    keys = ['secid', 'date', 'cp_flag', 'strike_price', 'exdate']
+    group_keys = ['secid', 'cp_flag', 'date', 'exdate']
 
-	#grab duplicates 
-	df_Dup = df[bool_Dup]
-	df_Dup = df_Dup.sort_values(by=[ 'cp_flag', 'date']).reset_index(drop = True)
+    # Identify duplicate entries
+    is_dup = df.duplicated(subset=keys, keep=False)
+    df_unique = df[~is_dup]
+    df_dupes = df[is_dup].copy()
 
-	##find moneyness neighbors
-	huntlist = ['secid', 'cp_flag', 'date', 'exdate']
-	mask = df.set_index(huntlist).index.isin(df_Dup.set_index(huntlist).index)
+    # Identify moneyness neighbors
+    is_neighbor = df.set_index(group_keys).index.isin(df_dupes.set_index(group_keys).index)
+    neighbors = df[is_neighbor].copy()
 
-	#all of the moneyness neighbors: 
-	df_Neigh = df[mask]
-	df_Neigh = df_Neigh.reset_index(drop =True)
+    # Compute absolute distance from moneyness = 1
+    neighbors['moneyness_dist'] = (neighbors['moneyness'] - 1).abs()
 
-	#in the money neighbors: 
-	m1 = df_Neigh.groupby(by = huntlist).apply(lambda x: ((x['moneyness']-1)**2).idxmin())
-	valid_indices = m1.dropna().astype(int).values # Drop NaN, ensure int type, get numpy array
-	
-	# Reshape if it's empty and 2D
-	if valid_indices.ndim == 2 and valid_indices.shape[0] == 0:
-		valid_indices = valid_indices.reshape(-1) # Reshape to 1D
+    # Get index of nearest neighbor by minimum moneyness distance
+    idx_neighbors = neighbors.groupby(group_keys)['moneyness_dist'].idxmin()
+    nearest = df.loc[idx_neighbors].copy()
+    nearest['mon_IV'] = nearest['IV'].fillna(0)
 
-	dMon = df_Neigh.loc[valid_indices]
+    # Merge reference IV into duplicate set
+    df_joined = pd.merge(df_dupes, nearest[group_keys + ['mon_IV']], on=group_keys, how='inner')
+    df_joined['IV_adj'] = df_joined['IV'].fillna(0)
 
-	###NEED IMPLIED VOLATILITIES TO BE CALCULATED 
-	dMon['mon_vola'] = dMon['impl_volatility']
-	#quick fix #1: 
-	dMon['mon_vola'] = dMon['mon_vola'].fillna(0)
-	#dMon[dMon['mon_vola'].isna()]
-	#Take subset of the In the Money dataframe to merge 
+    # Compute distance from neighbor IV
+    df_joined['vola_dist'] = (df_joined['IV_adj'] - df_joined['mon_IV']).abs()
 
-	# #Computing implied volatility 
-	# dMon['mon_vola'] = dMon.apply(lambda x: bsm.calc_implied_volatility(
-	# 	market_price = x['best_bid'], S = x['close'], K = x['strike_price'], 
-	# 	T = (x['exdate'] - x['date'])/datetime.timedelta(days=365), r = x['tb_m3'], option_type = x['cp_flag'], method = 'newton_raphson'), axis=1)
+    # Find idx of rows with minimum vola distance per group
+    idx_keep = df_joined.groupby(group_keys)['vola_dist'].idxmin()
+    kept = df_joined.loc[idx_keep].drop(columns=['IV_adj', 'mon_IV', 'vola_dist'])
 
+    # Combine with unique entries
+    df_final = pd.concat([df_unique, kept], ignore_index=True)
+    df_final = df_final.sort_values(by=['cp_flag', 'date']).reset_index(drop=True)
 
+    return df_final
 
-	dMonSub = dMon[huntlist + ['mon_vola']]
-	
-	##Join the ITM volatility with the correct option: 
-	df_Join = pd.merge(df_Dup, dMonSub, on = huntlist, how = 'inner')
-
-	#quick fix #2: 
-	df_Join['impl_volatility2'] = df_Join['impl_volatility']
-	df_Join['impl_volatility2'].fillna(0, inplace=True)
-
-
-	##Tried finding implied volatility: 
-	# df_Join['guess'] = df_Join['impl_volatility']
-	# df_Join['guess'].fillna(0.1, inplace=True)
-	# df_Join['impl_volatility2'] =	df_Join.apply(lambda x: bsm.calc_implied_volatility(
-	# 	market_price = x['best_bid'], S = x['close'], K = x['strike_price'], 
-	# 	T = (x['exdate'] - x['date'])/datetime.timedelta(days=365), r = x['tb_m3'], option_type = x['cp_flag'], method = 'binary_search', initial_guess = x['guess']), axis=1)
-	# df_Join[['impl_volatility', 'impl_volatility2']]
-
-	#findimplied volatility being closest to ITM: 
-	idx_keep_series = df_Join.groupby(by = huntlist).apply(lambda x: ((x['impl_volatility2']-x['mon_vola']).abs()).idxmin())
-	#df_Join[df_Join['mon_vola'].isna()]
-	idx_keep = idx_keep_series.dropna().astype(int).values # Drop NaN, ensure int, get numpy array
-	
-	# Reshape if it's empty and 2D (less likely here, but good practice)
-	if idx_keep.ndim == 2 and idx_keep.shape[0] == 0:
-		idx_keep = idx_keep.reshape(-1) # Reshape to 1D
-
-	#Tidy up the reduced subset of duplicates
-	df_reduced= df_Join.loc[idx_keep]
-	df_reduced = df_reduced.sort_values(by=[ 'cp_flag', 'date']).reset_index(drop=True)
-	df_reduced.drop(['impl_volatility2', 'mon_vola'], axis = 1, inplace = True)
-
-	#Combine the OG dataframe with No Duplicates with the reduced subset of duplicates
-	df = pd.concat([df_noDup, df_reduced], ignore_index = True)
-	df = df.sort_values(by=[ 'cp_flag', 'date']).reset_index(drop = True)
-
-	return df 
 
 def delete_zero_bid_filter(df): 
 	""" Helper function to delete options with zero bid from the dataframe
@@ -181,12 +139,12 @@ def appendixBfilter_level1(df):
 	df_sum['Starting'] = L0
 
 
-	df = delete_identical_filter(df)
+	df = identical_filter(df)
 	L1 = getLengths(df)
 	df_sum['Identical'] =  L0-L1
 
 
-	df = delete_identical_but_price_filter(df)
+	df = identical_but_price_filter(df)
 	L2 = getLengths(df)
 	df_sum['Identical but Price'] = L1-L2
 

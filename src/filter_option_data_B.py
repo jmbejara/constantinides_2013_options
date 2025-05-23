@@ -77,7 +77,7 @@ def appendixBfilter(start=START_DATE_01, end=END_DATE_01):
 	save_path_L1 = DATA_DIR.joinpath( f"intermediate/data_{start[:7]}_{end[:7]}_L1filter.parquet")
 	lv1OneSteps = ['Identical', 'Identical except price', 
 		'Bid = 0', 'Volume = 0'] 
-	lvlOneFilters = [f1.delete_identical_filter, f1.delete_identical_but_price_filter, 
+	lvlOneFilters = [f1.identical_filter, f1.identical_but_price_filter, 
 		f1.delete_zero_bid_filter, f1.keep_volume]
 	# lvlOneFilters = [f1.delete_identical_filter, f1.delete_identical_but_price_filter, 
 	# 	f1.delete_zero_bid_filter, f1.delete_zero_volume_filter]
