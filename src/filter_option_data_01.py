@@ -41,7 +41,7 @@ def getSecPrice(df):
 def calc_moneyness(df):
 	""" Helper function to calculate the moneyness of the options
 	"""
-	df['mnyns'] = df['strike_price']/df['sec_price']
+	df['moneyness'] = df['strike_price']/df['close']
 	return df
 
 def delete_identical_filter(df):
