@@ -14,31 +14,15 @@ import config
 
 DATA_DIR = Path(config.DATA_DIR)
 
-def calc_time_to_maturity(df):
-    """Calculate time to maturity in days.
-    """
-    ttm = (df['exdate'] - df['date']).dt.days
-    return ttm
 
-def calc_time_to_maturity_yrs(df):
-    """Calculate time to maturity in years.
-    """
-    ttm_yrs = calc_time_to_maturity(df) / 365
-    return ttm_yrs
+def calc_days_to_maturity(df):
+    # calc days to maturity
+    df = df.assign(days_to_maturity = df['exdate'].subtract(df['date']))
+    return df
 
-def filter_time_to_maturity(df):
-    """Days to Maturity <7 or >180 Filter: Filter options 
-       based on time to maturity.
-    """
-    # calculate time to maturity >> df.time_to_maturity
-    df['time_to_maturity'] = calc_time_to_maturity(df)
-
-    # calculate time to maturity in years >> df.time_to_matility_yrs
-    df['time_to_maturity_yrs'] = calc_time_to_maturity_yrs(df)  
-
-    # remove options with less than 7 days to maturity or greater than 180 days to maturity
-    df = df.loc[(df['time_to_maturity'] >= 7) & (df['time_to_maturity'] <= 180)].reset_index(drop=True)
-
+def days_to_maturity_filter(df, min_days=7, max_days=180):
+    df = calc_days_to_maturity(df)
+    df = df[(df['days_to_maturity'] >= pd.Timedelta(days=min_days)) & (df['days_to_maturity'] <= pd.Timedelta(days=max_days))]
     return df
 
 def filter_iv(df):
