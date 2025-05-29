@@ -25,14 +25,13 @@ def days_to_maturity_filter(df, min_days=7, max_days=180):
     df = df[(df['days_to_maturity'] >= pd.Timedelta(days=min_days)) & (df['days_to_maturity'] <= pd.Timedelta(days=max_days))]
     return df
 
-def filter_iv(df):
-    """IV<5% or >100% Filter: Filter options based on implied volatility.
+def iv_range_filter(df, min_iv=0.05, max_iv=1.00):
+    """Filter options based on implied volatility range.
+       Default is 5% to 100% (0.05 to 1.00).
     """
-    df = df.loc[((df['impl_volatility']>=0.05) 
-            & (df['impl_volatility']<=1.00))
-           | (df['impl_volatility'].isna())] 
-    
+    df = df[(df['IV'] >= min_iv) & (df['IV'] <= max_iv)]
     return df
+
 
 def filter_moneyness(df):
     """Moneyness <0.8 or >1.2 Filter: Filter options based on moneyness.
