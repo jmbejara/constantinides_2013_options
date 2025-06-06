@@ -869,9 +869,9 @@ def put_call_filter(df, date_range):
     print(' |-- PCP filter: filtering outliers...')
     l3_filtered_options = pcp_filter_outliers(matched_options, 'percent', 2.0)
     
-    print(' |-- PCP filter: saving L3 IV- and PCP-filtered data...')
+    # print(' |-- PCP filter: saving L3 IV- and PCP-filtered data...')
     # save to parquet and latex
-    l3_filtered_options.to_parquet(DATA_DIR / f'L3_PCP_filter_{date_range}.parquet')
+    # l3_filtered_options.to_parquet(DATA_DIR / f'L3_filtered_{date_range}.parquet')
     # l3_filtered_options.to_latex(OUTPUT_DIR / l3_output_file.replace('.parquet', '.tex').replace('intermediate/', ''))
     
     # build chart
