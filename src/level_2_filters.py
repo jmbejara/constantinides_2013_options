@@ -7,8 +7,8 @@ import numpy as np
 from datetime import datetime,timedelta
 import bsm_pricer as bsm
 import load_option_data_01 as l1
-import filter_option_data_01 as f1
-import filter_option_data_03 as f3
+import level_1_filters as f1
+import level_3_filters as f3
 from pathlib import Path
 import config
 
