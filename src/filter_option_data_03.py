@@ -89,9 +89,9 @@ def fit_and_store_curve(group):
     """
     try:
         # Fit the quadratic curve
-        coefficients = np.polyfit(group['mnyns'], group['log_iv'], 2)
+        coefficients = np.polyfit(group['moneyness'], group['log_iv'], 2)
         # Calculate fitted values
-        group['fitted_iv'] = np.polyval(coefficients, group['mnyns'])
+        group['fitted_iv'] = np.polyval(coefficients, group['moneyness'])
     except np.RankWarning:
         print("Polyfit may be poorly conditioned")
     return group
@@ -110,7 +110,7 @@ def apply_quadratic_iv_fit(l2_data):
     DataFrame: The input data with the quadratic curve fitting applied.
     """
     # Apply the quadratic curve fitting function to the data
-    l2_data = l2_data.dropna(subset=['mnyns', 'log_iv']).groupby(['date', 'exdate', 'cp_flag']).filter(lambda group: len(group) >= 3)
+    l2_data = l2_data.dropna(subset=['moneyness', 'log_iv']).groupby(['date', 'exdate', 'cp_flag']).filter(lambda group: len(group) >= 3)
     
     l2_data = l2_data.groupby(['date', 'exdate', 'cp_flag']).apply(fit_and_store_curve)
     
@@ -160,7 +160,7 @@ def mark_outliers(row, std_devs, outlier_threshold):
     """
     
     # Attempt to retrieve the standard deviation for the row's moneyness_bin
-    std_dev_row = std_devs.loc[std_devs['mnyns_bin'] == row['mnyns_bin'], 'std_dev']
+    std_dev_row = std_devs.loc[std_devs['moneyness_bin'] == row['moneyness_bin'], 'std_dev']
     
     # Check if std_dev_row is empty (i.e., no matching moneyness_bin was found)
     if not std_dev_row.empty:
@@ -185,8 +185,8 @@ def build_put_call_pairs(call_options, put_options):
     Returns:
         tuple of (matching_calls: pd.DataFrame, matching_puts: pd.DataFrame)
     """
-    call_options.set_index(['date', 'exdate', 'mnyns'], inplace=True)
-    put_options.set_index(['date', 'exdate', 'mnyns'], inplace=True)
+    call_options.set_index(['date', 'exdate', 'moneyness'], inplace=True)
+    put_options.set_index(['date', 'exdate', 'moneyness'], inplace=True)
     
     # get common indices
     common_index = call_options.index.intersection(put_options.index)
@@ -212,9 +212,9 @@ def test_price_strike_match(matching_calls_puts):
     """
     #print(matching_calls_puts)
     try:
-        return (np.allclose(matching_calls_puts['strike_price_C'], matching_calls_puts['strike_price_P'])) and (np.allclose(matching_calls_puts['sec_price_C'], matching_calls_puts['sec_price_P']))# and (np.allclose(matching_calls_puts['tb_m3_C'], matching_calls_puts['tb_m3_P']))
+        return (np.allclose(matching_calls_puts['strike_price_C'], matching_calls_puts['strike_price_P'])) and (np.allclose(matching_calls_puts['close_C'], matching_calls_puts['close_P']))# and (np.allclose(matching_calls_puts['tb_m3_C'], matching_calls_puts['tb_m3_P']))
     except KeyError:
-        if 'strike_price' in matching_calls_puts.columns and 'sec_price' in matching_calls_puts.columns:
+        if 'strike_price' in matching_calls_puts.columns and 'close' in matching_calls_puts.columns:
             return True
         else:
             return False
@@ -222,7 +222,7 @@ def test_price_strike_match(matching_calls_puts):
 
 def calc_implied_interest_rate(matched_options):
     """
-    Calculates the implied interest rate based on the given matched options data.
+    Calculates the implied interest rate assuming put-call parity, based on the given put/call matched option pairs.
 
     Parameters:
     matched_options (DataFrame): DataFrame containing the matched options data.
@@ -238,9 +238,9 @@ def calc_implied_interest_rate(matched_options):
     if test_price_strike_match(matched_options):
         print(" |-- PCP filter: Check ok --> Underlying prices, strike prices of put and call options match exactly.")
         try:
-            S = matched_options['sec_price_C']
+            S = matched_options['close_C']
         except KeyError:
-            S = matched_options['sec_price']
+            S = matched_options['close']
         
         try:
             K = matched_options['strike_price_C']  
@@ -298,7 +298,7 @@ def iv_filter_outliers(l2_data, iv_distance_method, iv_outlier_threshold):
     Filter out outliers based on the relative distance of log_iv and fitted_iv.
 
     Parameters:
-    l2_data (DataFrame): Input data containing log_iv, fitted_iv, mnyns columns.
+    l2_data (DataFrame): Input data containing log_iv, fitted_iv, moneyness columns.
     iv_distance_method (str): Method to calculate relative distance of log_iv and fitted_iv.
     iv_outlier_threshold (float): Threshold value to flag outliers.
 
@@ -310,15 +310,15 @@ def iv_filter_outliers(l2_data, iv_distance_method, iv_outlier_threshold):
 
     # Define moneyness bins
     bins = np.arange(0.8, 1.21, 0.05)
-    l2_data['mnyns_bin'] = pd.cut(l2_data['mnyns'], bins=bins)
+    l2_data['moneyness_bin'] = pd.cut(l2_data['moneyness'], bins=bins)
 
     # Compute standard deviation of relative distances within each moneyness bin
-    std_devs = l2_data.groupby('mnyns_bin')['rel_distance_iv'].std().reset_index(name='std_dev')
+    std_devs = l2_data.groupby('moneyness_bin')['rel_distance_iv'].std().reset_index(name='std_dev')
     
-    l2_data['stdev_iv_mnyns_bin'] = l2_data['mnyns_bin'].map(std_devs.set_index('mnyns_bin')['std_dev'])
-    l2_data['stdev_iv_mnyns_bin'].apply(lambda x: x*iv_outlier_threshold).astype(float)
+    l2_data['stdev_iv_moneyness_bin'] = l2_data['moneyness_bin'].map(std_devs.set_index('moneyness_bin')['std_dev'])
+    l2_data['stdev_iv_moneyness_bin'].apply(lambda x: x*iv_outlier_threshold).astype(float)
     # flag outliers based on the threshold
-    l2_data['is_outlier_iv'] = l2_data['rel_distance_iv'].abs() > l2_data['stdev_iv_mnyns_bin'].apply(lambda x: x*iv_outlier_threshold).astype(float)
+    l2_data['is_outlier_iv'] = l2_data['rel_distance_iv'].abs() > l2_data['stdev_iv_moneyness_bin'].apply(lambda x: x*iv_outlier_threshold).astype(float)
 
     # filter out the outliers
     l3_data_iv_only = l2_data[~l2_data['is_outlier_iv']]
@@ -356,8 +356,8 @@ def nan_iv_in_l2_data(l2_data, date_range):
     Example:
     nan_iv_in_l2_data(l2_data, '2021-01-01_2021-01-31')
     """
-    nan_iv_calls = l2_data[(l2_data['cp_flag'] == 'C') & (l2_data['impl_volatility'].isna())]
-    nan_iv_puts = l2_data[(l2_data['cp_flag'] == 'P') & (l2_data['impl_volatility'].isna())]
+    nan_iv_calls = l2_data[(l2_data['cp_flag'] == 'C') & (l2_data['IV'].isna())]
+    nan_iv_puts = l2_data[(l2_data['cp_flag'] == 'P') & (l2_data['IV'].isna())]
     nan_iv_summary = pd.DataFrame(index=['Calls', 'Puts'], columns = ['NaN IV Records', 'Total Records', '% NaN IV'])
     nan_iv_summary.loc['Calls'] = [len(nan_iv_calls), len(l2_data[l2_data['cp_flag'] == 'C']), len(nan_iv_calls)/len(l2_data[l2_data['cp_flag'] == 'C'])*100]
     nan_iv_summary.loc['Puts'] = [len(nan_iv_puts), len(l2_data[l2_data['cp_flag'] == 'P']), len(nan_iv_puts)/len(l2_data[l2_data['cp_flag'] == 'P'])*100]
@@ -372,15 +372,15 @@ def calc_relative_distance_stats(l3_data_iv_only, date_range):
     Calculate the statistics of the relative distance of options based on the given data and date range.
 
     Parameters:
-    l3_data_iv_only (DataFrame): DataFrame containing the option data with 'rel_distance_iv', 'mnyns' columns.
+    l3_data_iv_only (DataFrame): DataFrame containing the option data with 'rel_distance_iv', 'moneyness' columns.
     date_range (str): Date range for which the statistics are calculated.
 
     Returns:
     DataFrame: DataFrame containing the statistics of the relative distance of options.
 
     """
-    ntm_rel_dist = l3_data_iv_only[(l3_data_iv_only['mnyns'] < 1.1) & (l3_data_iv_only['mnyns'] > 0.9)].describe()['rel_distance_iv'].to_frame().rename(columns={'rel_distance_iv': 'Near-The-Money'})
-    fftm_rel_dist = l3_data_iv_only[(l3_data_iv_only['mnyns'] > 1.1) | (l3_data_iv_only['mnyns'] < 0.9)].describe()['rel_distance_iv'].to_frame().rename(columns={'rel_distance_iv': 'Far-From-The-Money Options'})
+    ntm_rel_dist = l3_data_iv_only[(l3_data_iv_only['moneyness'] < 1.1) & (l3_data_iv_only['moneyness'] > 0.9)].describe()['rel_distance_iv'].to_frame().rename(columns={'rel_distance_iv': 'Near-The-Money'})
+    fftm_rel_dist = l3_data_iv_only[(l3_data_iv_only['moneyness'] > 1.1) | (l3_data_iv_only['moneyness'] < 0.9)].describe()['rel_distance_iv'].to_frame().rename(columns={'rel_distance_iv': 'Far-From-The-Money Options'})
     rel_dist_stats = pd.concat([ntm_rel_dist, fftm_rel_dist], axis=1)
     
     rel_dist_stats.style.format('{:,.2f}').set_caption('Relative Distance Stats')
@@ -403,7 +403,7 @@ def build_l2_data_chart(l2_data, date_range):
     """
 
     fig, ax = plt.subplots(2,3, figsize=(12,8))
-    ax[0,0].hist(l2_data['impl_volatility'], bins=250, color='darkblue')
+    ax[0,0].hist(l2_data['IV'], bins=250, color='darkblue')
     ax[0,0].set_xlabel('IV')
     ax[0,0].set_ylabel('Frequency')
     ax[0,0].set_title('Distribution of IV')
@@ -417,12 +417,12 @@ def build_l2_data_chart(l2_data, date_range):
 
     l2_data = l2_data.set_index(['date', 'exdate', 'cp_flag'])
     # IV curves for calls and puts, prior to level 3 filters
-    ax[1,0].scatter(x=l2_data.xs('C', level='cp_flag')['mnyns'], y=np.exp(l2_data.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
+    ax[1,0].scatter(x=l2_data.xs('C', level='cp_flag')['moneyness'], y=np.exp(l2_data.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
     ax[1,0].set_xlabel('Moneyness')
     ax[1,0].set_ylabel('IV')
     ax[1,0].set_title('IV vs Moneyness (Calls)')
 
-    ax[1,1].scatter(x=l2_data.xs('P', level='cp_flag')['mnyns'], y=np.exp(l2_data.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
+    ax[1,1].scatter(x=l2_data.xs('P', level='cp_flag')['moneyness'], y=np.exp(l2_data.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
     ax[1,1].set_xlabel('Moneyness')
     ax[1,1].set_ylabel('IV')
     ax[1,1].set_title('IV vs Moneyness (Puts)')
@@ -430,9 +430,9 @@ def build_l2_data_chart(l2_data, date_range):
     # options with nan implied volatility
     l2_data = l2_data.reset_index()
     # calls only
-    nan_iv_calls = l2_data[(l2_data['cp_flag'] == 'C') & (l2_data['impl_volatility'].isna())]
+    nan_iv_calls = l2_data[(l2_data['cp_flag'] == 'C') & (l2_data['IV'].isna())]
     # puts only
-    nan_iv_puts = l2_data[(l2_data['cp_flag'] == 'P') & (l2_data['impl_volatility'].isna())]
+    nan_iv_puts = l2_data[(l2_data['cp_flag'] == 'P') & (l2_data['IV'].isna())]
     
     if len(nan_iv_calls)==0 and len(nan_iv_puts)==0:
         print(" |-- IV filter: No NaN IV records for calls or puts in L2 data")
@@ -440,8 +440,8 @@ def build_l2_data_chart(l2_data, date_range):
         ax[1,2].axis('off')
         
     else:
-        ax[0,2].scatter(x=nan_iv_calls['date'], y=nan_iv_calls['mnyns'], color='blue', alpha=0.1, s=10, label='Calls')
-        ax[0,2].scatter(x=nan_iv_puts['date'], y=nan_iv_puts['mnyns'], color='red', alpha=0.1, s=10, label='Puts')
+        ax[0,2].scatter(x=nan_iv_calls['date'], y=nan_iv_calls['moneyness'], color='blue', alpha=0.1, s=10, label='Calls')
+        ax[0,2].scatter(x=nan_iv_puts['date'], y=nan_iv_puts['moneyness'], color='red', alpha=0.1, s=10, label='Puts')
 
         ax[0,2].set_xlabel('Trade Date')
         ax[0,2].set_ylabel('Moneyness')
@@ -451,7 +451,7 @@ def build_l2_data_chart(l2_data, date_range):
         ax[0,2].grid()
 
         # percentage of NaN IV
-        nan_percentage = l2_data.groupby(['date', 'cp_flag'])['impl_volatility'].apply(lambda x: (x.isna().sum() / len(x))*100)
+        nan_percentage = l2_data.groupby(['date', 'cp_flag'])['IV'].apply(lambda x: (x.isna().sum() / len(x))*100)
 
         # calls only
         nan_percentage_calls = nan_percentage[nan_percentage.index.get_level_values(1)=='C']
@@ -472,7 +472,12 @@ def build_l2_data_chart(l2_data, date_range):
     # plt.show()
     
     # fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig1_post_L2filter.svg')
-    fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig1_post_L2filter.png')
+    try:
+        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig1_post_L2filter.png')
+    except FileNotFoundError:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig1_post_L2filter.png')
+        
     # fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig1_post_L2filter.pdf')
     
     
@@ -490,7 +495,7 @@ def build_l2_fitted_iv_chart(l2_data, date_range):
 
     fig, ax = plt.subplots(2,3, figsize=(12,8))
 
-    ax[0,0].hist(l2_data['impl_volatility'], bins=250, color='darkblue')
+    ax[0,0].hist(l2_data['IV'], bins=250, color='darkblue')
     ax[0,0].set_xlabel('IV')
     ax[0,0].set_ylabel('Frequency')
     ax[0,0].set_title('Distribution of IV')
@@ -512,12 +517,12 @@ def build_l2_fitted_iv_chart(l2_data, date_range):
     ax[0,2].grid()
 
 
-    ax[1,0].scatter(x=l2_data.xs('C', level='cp_flag')['mnyns'], y=np.exp(l2_data.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
+    ax[1,0].scatter(x=l2_data.xs('C', level='cp_flag')['moneyness'], y=np.exp(l2_data.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
     ax[1,0].set_xlabel('Moneyness')
     ax[1,0].set_ylabel('IV')
     ax[1,0].set_title('IV vs Moneyness (Calls)')
 
-    ax[1,1].scatter(x=l2_data.xs('P', level='cp_flag')['mnyns'], y=np.exp(l2_data.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
+    ax[1,1].scatter(x=l2_data.xs('P', level='cp_flag')['moneyness'], y=np.exp(l2_data.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
     ax[1,1].set_xlabel('Moneyness')
     ax[1,1].set_ylabel('IV')
     ax[1,1].set_title('IV vs Moneyness (Puts)')
@@ -530,7 +535,11 @@ def build_l2_fitted_iv_chart(l2_data, date_range):
     # plt.show()
     
     #fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig2_L2fitted_iv.svg')
-    fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig2_L2fitted_iv.png')
+    try:
+        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig2_L2fitted_iv.png')
+    except FileNotFoundError:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig2_L2fitted_iv.png')
     # fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig2_L2fitted_iv.pdf')
     
 
@@ -548,7 +557,7 @@ def build_l3_data_iv_only_chart(l3_data_iv_only, date_range):
 
     fig, ax = plt.subplots(3,3, figsize=(12,12))
 
-    ax[0,0].hist(l3_data_iv_only['impl_volatility'], bins=250, color='darkblue')
+    ax[0,0].hist(l3_data_iv_only['IV'], bins=250, color='darkblue')
     ax[0,0].set_xlabel('IV')
     ax[0,0].set_ylabel('Frequency')
     ax[0,0].set_title('Distribution of IV')
@@ -570,27 +579,27 @@ def build_l3_data_iv_only_chart(l3_data_iv_only, date_range):
     ax[0,2].grid()
 
 
-    ax[1,0].scatter(x=l3_data_iv_only.xs('C', level='cp_flag')['mnyns'], y=np.exp(l3_data_iv_only.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
+    ax[1,0].scatter(x=l3_data_iv_only.xs('C', level='cp_flag')['moneyness'], y=np.exp(l3_data_iv_only.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
     ax[1,0].set_xlabel('Moneyness')
     ax[1,0].set_ylabel('IV')
     ax[1,0].set_title('IV vs Moneyness (Calls)')
 
-    ax[1,1].scatter(x=l3_data_iv_only.xs('P', level='cp_flag')['mnyns'], y=np.exp(l3_data_iv_only.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
+    ax[1,1].scatter(x=l3_data_iv_only.xs('P', level='cp_flag')['moneyness'], y=np.exp(l3_data_iv_only.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
     ax[1,1].set_xlabel('Moneyness')
     ax[1,1].set_ylabel('IV')
     ax[1,1].set_title('IV vs Moneyness (Puts)')
 
 
-    ax[2,0].scatter(x=l3_data_iv_only.xs('C', level='cp_flag')['mnyns'], y=l3_data_iv_only.xs('C', level='cp_flag')['rel_distance_iv'], color='blue', alpha=0.1, label='Calls')
+    ax[2,0].scatter(x=l3_data_iv_only.xs('C', level='cp_flag')['moneyness'], y=l3_data_iv_only.xs('C', level='cp_flag')['rel_distance_iv'], color='blue', alpha=0.1, label='Calls')
     ax[2,0].set_xlabel('Moneyness')
     ax[2,0].set_ylabel('Relative Distance %')
-    ax[2,0].set_title('Rel. Distance of logIV-fitted IV vs Mnyns (Calls)')
+    ax[2,0].set_title('Rel. Distance of logIV-fitted IV vs moneyness (Calls)')
     ax[2,0].grid()
 
-    ax[2,1].scatter(x=l3_data_iv_only.xs('P', level='cp_flag')['mnyns'], y=l3_data_iv_only.xs('P', level='cp_flag')['rel_distance_iv'], color='red', alpha=0.1, label='Puts')
+    ax[2,1].scatter(x=l3_data_iv_only.xs('P', level='cp_flag')['moneyness'], y=l3_data_iv_only.xs('P', level='cp_flag')['rel_distance_iv'], color='red', alpha=0.1, label='Puts')
     ax[2,1].set_xlabel('Moneyness')
     ax[2,1].set_ylabel('Relative Distance %')
-    ax[2,1].set_title('Rel. Distance of logIV-fitted IV vs Mnyns (Puts)')
+    ax[2,1].set_title('Rel. Distance of logIV-fitted IV vs moneyness (Puts)')
     ax[2,1].grid()
 
     # hide unused subplots
@@ -602,7 +611,11 @@ def build_l3_data_iv_only_chart(l3_data_iv_only, date_range):
     # plt.show()
     
     #fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig3_IV_filter_only.svg')
-    fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig3_IV_filter_only.png')
+    try:
+        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig3_IV_filter_only.png')
+    except FileNotFoundError:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig3_IV_filter_only.png')
     # fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig3_IV_filter_only.pdf')
 
 
@@ -623,7 +636,7 @@ def build_l3_data_iv_pcp_chart(l3_filtered_options, date_range):
 
     chart_data = l3_filtered_options.reset_index().set_index(['date', 'exdate', 'cp_flag'])
 
-    ax[0,0].hist(chart_data['impl_volatility'], bins=250, color='darkblue')
+    ax[0,0].hist(chart_data['IV'], bins=250, color='darkblue')
     ax[0,0].set_xlabel('IV')
     ax[0,0].set_ylabel('Frequency')
     ax[0,0].set_title('Distribution of IV')
@@ -645,27 +658,27 @@ def build_l3_data_iv_pcp_chart(l3_filtered_options, date_range):
     ax[0,2].grid()
 
 
-    ax[1,0].scatter(x=chart_data.xs('C', level='cp_flag')['mnyns'], y=np.exp(chart_data.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
+    ax[1,0].scatter(x=chart_data.xs('C', level='cp_flag')['moneyness'], y=np.exp(chart_data.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
     ax[1,0].set_xlabel('Moneyness')
     ax[1,0].set_ylabel('IV')
     ax[1,0].set_title('IV vs Moneyness (Calls)')
 
-    ax[1,1].scatter(x=chart_data.xs('P', level='cp_flag')['mnyns'], y=np.exp(chart_data.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
+    ax[1,1].scatter(x=chart_data.xs('P', level='cp_flag')['moneyness'], y=np.exp(chart_data.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
     ax[1,1].set_xlabel('Moneyness')
     ax[1,1].set_ylabel('IV')
     ax[1,1].set_title('IV vs Moneyness (Puts)')
 
 
-    ax[2,0].scatter(x=chart_data.xs('C', level='cp_flag')['mnyns'], y=chart_data.xs('C', level='cp_flag')['rel_distance_iv'], color='blue', alpha=0.1, label='Calls')
+    ax[2,0].scatter(x=chart_data.xs('C', level='cp_flag')['moneyness'], y=chart_data.xs('C', level='cp_flag')['rel_distance_iv'], color='blue', alpha=0.1, label='Calls')
     ax[2,0].set_xlabel('Moneyness')
     ax[2,0].set_ylabel('Relative Distance %')
-    ax[2,0].set_title('Rel. Distance of logIV-fitted IV vs Mnyns (Calls)')
+    ax[2,0].set_title('Rel. Distance of logIV-fitted IV vs moneyness (Calls)')
     ax[2,0].grid()
 
-    ax[2,1].scatter(x=chart_data.xs('P', level='cp_flag')['mnyns'], y=chart_data.xs('P', level='cp_flag')['rel_distance_iv'], color='red', alpha=0.1, label='Puts')
+    ax[2,1].scatter(x=chart_data.xs('P', level='cp_flag')['moneyness'], y=chart_data.xs('P', level='cp_flag')['rel_distance_iv'], color='red', alpha=0.1, label='Puts')
     ax[2,1].set_xlabel('Moneyness')
     ax[2,1].set_ylabel('Relative Distance %')
-    ax[2,1].set_title('Rel. Distance of logIV-fitted IV vs Mnyns (Puts)')
+    ax[2,1].set_title('Rel. Distance of logIV-fitted IV vs moneyness (Puts)')
     ax[2,1].grid()
 
     # hide unused subplots
@@ -677,7 +690,12 @@ def build_l3_data_iv_pcp_chart(l3_filtered_options, date_range):
     # plt.show()
     
     #fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig4_IV_and_PCP.svg')
-    fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig4_IV_and_PCP.png')
+    try:
+        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig4_IV_and_PCP.png')
+    except FileNotFoundError:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig4_IV_and_PCP.png')
+        
     # fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig4_IV_and_PCP.pdf')
 
 
@@ -756,7 +774,7 @@ def compare_to_optionmetrics(l2_data, l3_data_iv_only, l3_filtered_options, date
     return final_result_compare
 
 
-def IV_filter(_df, date_range):
+def IV_filter(l2_data, date_range):
     """
     Apply IV filter to the option data.
 
@@ -770,13 +788,8 @@ def IV_filter(_df, date_range):
     """
     print(' \n>> Running IV filter...')
     
-    l2_input_file, l3_iv_only_output_file, _ = get_filepaths(date_range)
-    
-    # build IV filter for L2 data
-    # read in L2 filtered data
-    l2_data = pd.read_parquet(DATA_DIR / l2_input_file, columns=['secid', 'date', 'exdate', 'cp_flag', 'mnyns', 'impl_volatility', 'tb_m3', 'best_bid', 'best_offer', 'strike_price', 'contract_size', 'sec_price', 'volume', 'open_interest'])
     # calc log IV 
-    l2_data['log_iv'] = np.log(l2_data['impl_volatility'])
+    l2_data['log_iv'] = np.log(l2_data['IV'])
     
     print(' |-- IV filter: L2 data loaded, building pre-L3 filter charts...')
     build_l2_data_chart(l2_data, date_range)
@@ -791,24 +804,25 @@ def IV_filter(_df, date_range):
     
     print(' |-- IV filter: filtering outliers...')
     l3_data_iv_only = iv_filter_outliers(l2_data, 'percent', 2.0)
-    # convert mnyns_bin to string to save
-    l3_data_iv_only['mnyns_bin'] = l3_data_iv_only['mnyns_bin'].astype(str)
+    # convert moneyness_bin to string to save
+    l3_data_iv_only['moneyness_bin'] = l3_data_iv_only['moneyness_bin'].astype(str)
     
     print(' |-- IV filter: saving L3 IV-filtered data...')
-    l3_data_iv_only.to_parquet(DATA_DIR / l3_iv_only_output_file)
+    l3_data_iv_only.to_parquet(DATA_DIR / f'L3_IV_filter_only_{date_range}.parquet')
     
     print(' |-- IV filter: building L3 IV-filtered charts...')
     build_l3_data_iv_only_chart(l3_data_iv_only, date_range)
     print(' |-- IV filter complete.')    
     
     # compare to optionmetrics
-    global final_result_compare
-    final_result_compare = partial(compare_to_optionmetrics, l2_data=l2_data, l3_data_iv_only=l3_data_iv_only, date_range=date_range)
+    # global final_result_compare
+    # final_result_compare = partial(compare_to_optionmetrics, l2_data=l2_data, l3_data_iv_only=l3_data_iv_only, date_range=date_range)
     
     return l3_data_iv_only
 
 
-def put_call_filter(_df, date_range): 
+
+def put_call_filter(df, date_range): 
     """
     Filters option data using the put-call parity filter.
 
@@ -822,26 +836,26 @@ def put_call_filter(_df, date_range):
     
     print(' \n>> Running PCP filter...')
     
-    _, l3_iv_only_output_file, l3_output_file = get_filepaths(date_range)
+    # _, l3_iv_only_output_file, l3_output_file = get_filepaths(date_range)
     
-    try:
-        l3_data_iv_only = pd.read_parquet(DATA_DIR / l3_iv_only_output_file)    
-        print(' |-- PCP filter: L3 data (IV filter only) loaded...')
-    except FileNotFoundError:
-        raise FileNotFoundError(f"File {l3_iv_only_output_file} not found. Please run the IV filter first.")
+    # try:
+    #     l3_data_iv_only = pd.read_parquet(DATA_DIR / l3_iv_only_output_file)    
+    #     print(' |-- PCP filter: L3 data (IV filter only) loaded...')
+    # except FileNotFoundError:
+    #     raise FileNotFoundError(f"File {l3_iv_only_output_file} not found. Please run the IV filter first.")
     
     # calculate bid-ask midpoint
     print(' |-- PCP filter: calculating bid-ask midpoint...')
-    l3_data_iv_only['mid_price'] = (l3_data_iv_only['best_bid'] + l3_data_iv_only['best_offer']) / 2
+    df['mid_price'] = (df['best_bid'] + df['best_offer']) / 2
     # extract all the call options
-    call_options = l3_data_iv_only.xs('C', level='cp_flag')
+    call_options = df.xs('C', level='cp_flag')
     # extract all the put options
-    put_options = l3_data_iv_only.xs('P', level='cp_flag')
+    put_options = df.xs('P', level='cp_flag')
     
     print(' |-- PCP filter: building put-call pairs...')
     matching_calls, matching_puts = build_put_call_pairs(call_options.reset_index(drop=True), put_options.reset_index(drop=True))
     # match the puts and calls
-    matched_options = pd.merge(matching_calls, matching_puts, on=['date', 'exdate', 'mnyns'], suffixes=('_C', '_P'))
+    matched_options = pd.merge(matching_calls, matching_puts, on=['date', 'exdate', 'moneyness'], suffixes=('_C', '_P'))
     
     # calculate the PCP implied interest rate 
     print(' |-- PCP filter: calculating PCP implied interest rate...')
@@ -857,7 +871,7 @@ def put_call_filter(_df, date_range):
     
     print(' |-- PCP filter: saving L3 IV- and PCP-filtered data...')
     # save to parquet and latex
-    l3_filtered_options.to_parquet(DATA_DIR / l3_output_file)
+    l3_filtered_options.to_parquet(DATA_DIR / f'L3_PCP_filter_{date_range}.parquet')
     # l3_filtered_options.to_latex(OUTPUT_DIR / l3_output_file.replace('.parquet', '.tex').replace('intermediate/', ''))
     
     # build chart
@@ -865,11 +879,93 @@ def put_call_filter(_df, date_range):
     build_l3_data_iv_pcp_chart(l3_filtered_options, date_range)
     print(' |-- PCP filter complete.')
     
-    # compare to optionmetrics
-    global final_result_compare
-    final_result_compare = final_result_compare(l3_filtered_options=l3_filtered_options)
+    # # compare to optionmetrics
+    # global final_result_compare
+    # final_result_compare = final_result_compare(l3_filtered_options=l3_filtered_options)
 
     return l3_filtered_options
+
+
+def common_iv_charts(data, date_range, fig_name, plot_nan_iv=False, has_fitted_iv=False, has_rel_dist=False, output_dir=OUTPUT_DIR):
+    """
+    Generalized function to plot IV-related charts.
+    Parameters control which additional panels are drawn.
+    """
+    if plot_nan_iv:
+        fig, ax = plt.subplots(2, 3, figsize=(12, 8))
+    elif has_rel_dist:
+        fig, ax = plt.subplots(3, 3, figsize=(12, 12))
+    else:
+        fig, ax = plt.subplots(2, 3, figsize=(12, 8))
+
+    ax[0, 0].hist(data['IV'], bins=250, color='darkblue')
+    ax[0, 0].set(xlabel='IV', ylabel='Frequency', title='Distribution of IV')
+    ax[0, 0].grid()
+
+    ax[0, 1].hist(data['log_iv'], bins=250, color='grey')
+    ax[0, 1].set(xlabel='log(IV)', ylabel='Frequency', title='Distribution of log(IV)')
+    ax[0, 1].grid()
+
+    if has_fitted_iv:
+        ax[0, 2].scatter(data['log_iv'], data['fitted_iv'], color='darkblue', alpha=0.1)
+        ax[0, 2].plot([data['log_iv'].min(), data['log_iv'].max()],
+                      [data['log_iv'].min(), data['log_iv'].max()],
+                      color='red', linestyle='--')
+        ax[0, 2].set(xlabel='log(IV)', ylabel='Fitted log(IV)', title='log(IV) vs Fitted log(IV)')
+        ax[0, 2].grid()
+    elif plot_nan_iv:
+        nan_calls = data[(data['cp_flag'] == 'C') & (data['IV'].isna())]
+        nan_puts = data[(data['cp_flag'] == 'P') & (data['IV'].isna())]
+        if nan_calls.empty and nan_puts.empty:
+            ax[0, 2].axis('off')
+            ax[1, 2].axis('off')
+        else:
+            ax[0, 2].scatter(nan_calls['date'], nan_calls['moneyness'], color='blue', alpha=0.1, s=10, label='Calls')
+            ax[0, 2].scatter(nan_puts['date'], nan_puts['moneyness'], color='red', alpha=0.1, s=10, label='Puts')
+            ax[0, 2].set(xlabel='Trade Date', ylabel='Moneyness', title='Moneyness of NaN IV Options')
+            ax[0, 2].legend()
+            ax[0, 2].grid()
+
+            pct_nan = data.groupby(['date', 'cp_flag'])['IV'].apply(lambda x: x.isna().mean() * 100)
+            ax[1, 2].scatter(pct_nan[pct_nan.index.get_level_values(1) == 'C'].index.get_level_values(0),
+                             pct_nan[pct_nan.index.get_level_values(1) == 'C'].values,
+                             color='blue', alpha=0.1, s=10, label='Calls')
+            ax[1, 2].scatter(pct_nan[pct_nan.index.get_level_values(1) == 'P'].index.get_level_values(0),
+                             pct_nan[pct_nan.index.get_level_values(1) == 'P'].values,
+                             color='red', alpha=0.1, s=10, label='Puts')
+            ax[1, 2].set(xlabel='Trade Date', ylabel='% NaN IV', title='NaN IV % by Date')
+            ax[1, 2].legend()
+            ax[1, 2].grid()
+    else:
+        ax[0, 2].axis('off')
+
+    grouped = data.set_index(['date', 'exdate', 'cp_flag'])
+
+    for i, flag in enumerate(['C', 'P']):
+        subset = grouped.xs(flag, level='cp_flag')
+        ax[1, i].scatter(subset['moneyness'], np.exp(subset['log_iv']), alpha=0.1, label=flag,
+                         color='blue' if flag == 'C' else 'red')
+        ax[1, i].set(xlabel='Moneyness', ylabel='IV', title=f'IV vs Moneyness ({flag})')
+        ax[1, i].grid()
+
+        if has_rel_dist:
+            ax[2, i].scatter(subset['moneyness'], subset['rel_distance_iv'], alpha=0.1,
+                             color='blue' if flag == 'C' else 'red')
+            ax[2, i].set(xlabel='Moneyness', ylabel='Relative Distance %',
+                         title=f'Rel. Distance logIV-fitted IV ({flag})')
+            ax[2, i].grid()
+
+    if has_rel_dist:
+        ax[1, 2].axis('off')
+        ax[2, 2].axis('off')
+
+    plt.suptitle(f'Options IV Chart: {date_range.replace("_", " to ")}')
+    plt.tight_layout()
+
+    output_file = os.path.join(output_dir, f'L3_{date_range}_{fig_name}.png')
+    os.makedirs(output_dir, exist_ok=True)
+    fig.savefig(output_file)
+    plt.close(fig)
 
 
 if __name__ == "__main__": 
