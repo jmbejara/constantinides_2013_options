@@ -1,185 +1,138 @@
-# Portfolio Returns Reproduction
-##  Based on Constantinides, George M., Jens Carsten Jackwerth, and Alexi Savov. “The puzzle of index option returns.” Review of Asset Pricing Studies 3, no. 2 (2013): 229-257.
+# SPX Option Portfolio Construction Workflow
 
-
-### SPX Option Portfolio Construction Process
-
-1. Utilize 3-tiered options data filtration process outlined in *Constantinides, Jackwerth, Savov (2013)* ("**CJS**").
-
-2. Construct option portfolios using the process outlined in *He, Kelly, Manela (2017)* ("**HKM**").
-
-
-
-## SPX Option Portfolio Construction — Work Process
-
-### Step 1: Data
-- SPX index options data from WRDS / OptionMetrics:
-    -- Do we want this code to be flexible to any timeframe? 
-    -- Do we ignore the time period replication issues raised in the final project last year? 
-- Required fields: strike, maturity, bid/ask, implied vol, underlying index level, option type (call/put)
+**Based on:**  
+- Constantinides, Jackwerth, Savov (2013) — *The Puzzle of Index Option Returns*  
+- He, Kelly, Manela (2017) — *Intermediary Asset Pricing*
 
 ---
 
-### Step 2: Data Filtering (per Constantinides, Jackwerth, Savov 2013)
-- Apply 3-step filtration process:
-  1. Retain only reliable quotes based on bid-ask and quote conditions
-  2. Apply stricter filters to the buy-side of the market
-  3. For missing quotes:
-     - Use raw quote if available
-     - Use payoff if expiration is near
-     - Otherwise interpolate **implied vol** using fitted surface and reconstruct price
+## Overview
+
+This workflow builds portfolios of S&P 500 index options to replicate and extend results in CJS (2013) and HKM (2017). The goal is to reconstruct the time series of returns for option portfolios used in HKM on cross-sectional asset pricing. The primary difference between the CJS and HKM papers is that the HKM study utilizes 18 portfolios instead of 54 in CJS, by taking an equal-weighted average across the 3 maturities utilized in CJS (i.e. 30, 60, and 90 days).
 
 ---
 
-### Step 3: Define Portfolio Bins
-- Create 54 distinct portfolios (***or 18 per HKM??***):
-  - 9 moneyness bins: [0.90, 0.925, ..., 1.10]
-  - 3 time-to-maturity buckets: 30, 60, 90 days
-  - 2 option types: call and put
+## Data Utilized
 
----
-
-### Step 4: Return Computation (per He, Kelly, Manela 2017)
-- For each option in each portfolio:
-  - Compute one-day arithmetic return using midpoint of bid-ask
-  - Apply leverage adjustment to achieve beta = 1 using Black-Scholes elasticity:
-    - Call: $\frac{\partial C}{\partial S} \cdot \frac{S}{C} > 1$
-    - Put: $\frac{\partial P}{\partial S} \cdot \frac{S}{P} < -1$
-  - Hold fractional option positions; invest remaining capital in the risk-free asset
-
----
-
-### Step 5: Weighting and Cleaning
-- No kernel smoothing is applied (unlike Constantinides et al.)
-- Use filtered options only
-- Interpolate implied vol surface as needed for missing contracts
-- If price still missing, carry forward last known price and rescale weights
-
----
-
-### Step 6: Aggregation and Output -- DISCUSS
-- Compute leverage-adjusted returns daily
-- Compound daily returns into monthly returns per portfolio
-- Optional: collapse 54 portfolios into 18 by averaging over maturities for each moneyness and option type
-
----
-
-### Step 7: Panel Data Formatting -- DISCUSS
-- Structure final dataset as panel data:
-  - Dimensions: Date × Portfolio ID
-  - Variables: return, moneyness, maturity, option type
-
----
-
-### Step 8: Downstream Use ??
-- Use portfolio returns in cross-sectional asset pricing models
-- Compatible with Fama-MacBeth regressions and intermediary factor models
+- SPX options data from WRDS / OptionMetrics, from January 1996 - December 2019. 
 
 
 ---
 
-### Portfolio Construction in He, Kelly, Manela (2017)
+## Step 2: SPX Option Data Filtration Protocol
+*Based on Constantinides, Jackwerth, and Savov (2013), Appendix B*
 
-#### 1. Objective
-To create representative test portfolios across various asset classes (including options), enabling cross-sectional asset pricing tests of intermediary capital risk.
+### Level 1 Filters — Data Deduplication and Quote Reliability
 
----
+These filters remove redundant quotes and structurally unreliable observations.
 
-#### 2. Option Portfolio Structure
-- **54 portfolios**: S&P 500 index options, sorted by:
-  - **Moneyness (strike/index)**: 9 levels  
-  - **Maturity**: 30, 60, or 90 days  
-  - **Type**: Separate portfolios for **calls** and **puts**
-- **Final form for testing**: HKM reduced the 54 to **18 portfolios** by averaging across maturities with the same moneyness.
+- **Identical Filter**  
+  Drop duplicate entries with the same option type, strike, expiration, and price. Retain only one instance per combination.
 
----
+- **Identical Except Price Filter**  
+  For quotes with identical terms (option type, strike, expiration) but different prices, retain the quote whose T-bill-implied volatility is closest to that of its neighbors in moneyness. Remove the rest.
 
-#### 3. Return Computation
-- **Daily arithmetic return**, based on the **midpoint of bid-ask prices**
-- **Leverage-adjusted** to achieve a **market beta of 1** using Black-Scholes **elasticity**:
-  - Call elasticity = $\frac{\partial C}{\partial S} \cdot \frac{S}{C} > 1$  
-  - Put elasticity = $\frac{\partial P}{\partial S} \cdot \frac{S}{P} < -1$
-- Fractional option holdings + remainder in **risk-free asset**
+- **Bid = 0 Filter**  
+  Eliminate quotes with zero bid price to avoid stale or low-value options. Zero bids may also reflect censoring, as negative bids are not recordable.
+
+- **Volume = 0 Filter**  
+  Although not discussed in Appendix B, CJS Table B.1 lists this filter. We acknowledge its presence but exclude it from our protocol, as applying it drops over 70% of the remaining records and is not described in the methodology text.
 
 ---
 
-#### 4. Weighting and Cleaning
-- No **kernel weighting** like Constantinides et al.
-- Use of **filtered data** with interpolated **implied volatility surface**
-- **Missing data** handled via interpolation or holding asset at previous price
+### Level 2 Filters — Economic Plausibility and Pricing Consistency
+
+These filters enforce basic economic logic, plausible moneyness, and valid interest rate inference from market prices.
+
+- **Days to Maturity < 7 or > 180**  
+  Drop options with fewer than 7 or more than 180 calendar days to expiration. Very short-dated options behave erratically, and long-dated options are often illiquid.
+
+- **Implied Volatility < 5% or > 100%**  
+  Remove options with extreme implied volatility values, using T-bill rates. Such extremes are likely due to stale quotes or poor fits.
+
+- **Moneyness < 0.8 or > 1.2**  
+  Eliminate deep ITM or OTM options where pricing is dominated by intrinsic value or illiquidity, limiting informativeness for IV surface construction.
+
+- **Implied Interest Rate < 0**  
+  Use put-call parity to back out the implied interest rate from matched quotes. Drop any options for which the implied interest rate is negative. Remaining quotes are assigned the median implied rate by maturity (for moneyness 0.95–1.05), and the rest are interpolated across maturities and days.
+
+- **Unable to Compute IV (Negative Time Value)**  
+  Discard quotes that imply negative time value, indicating arbitrage violations or pricing errors that invalidate IV computation.
 
 ---
 
-#### 5. Aggregation
-- Daily leverage-adjusted returns → **monthly compounded returns**
-- Each
+### Level 3 Filters — Surface Fit Outlier Removal and Arbitrage Constraints
+
+These filters ensure internal consistency across the implied volatility surface and enforce no-arbitrage conditions.
+
+- **Implied Volatility Filter**  
+  For each date and maturity, fit a quadratic curve to the log-implied volatilities of calls and puts separately. Remove options that deviate substantially from the fitted curve, as these are likely mispriced or stale quotes.
+
+- **Put-Call Parity Filter**  
+  Match put-call pairs by date, strike, and expiration. Compute a put-call parity-implied interest rate, and drop quotes where the implied rate deviates significantly from the daily median, suggesting violations of parity or data inconsistency.
 
 
-----
-
-
-### **Portfolio Construction in Constantinides (2013)**
-- **Number of Portfolios**: 54 total, split into:
-  - 27 call option portfolios  
-  - 27 put option portfolios
-- **Design Grid**: Each portfolio is defined by a specific:
-  - **Time to maturity**: 30, 60, or 90 days  
-  - **Moneyness**: 9 levels:  
-    `0.90, 0.925, 0.95, 0.975, 1.00, 1.025, 1.05, 1.075, 1.10`  
-    - *Moneyness = strike price / index level*
 
 ---
 
-### **Data and Filters**
-- **Sources**:
-  - Berkeley Options Database (1986–1995)  
-  - OptionMetrics (1996–2012)
-- **Filtering**:
-  - Only reliable quotes are used  
-  - 173,125 (Berkeley) and 824,397 (OptionMetrics) observations after filtering  
-  - Filters are applied more strictly on the buy side; missing quotes are interpolated using a fitted implied volatility surface
+## Step 3: Define Portfolio Grid
+
+- Construct **54 portfolios**:
+  - **Moneyness bins (9):** 0.90, 0.925, ..., 1.10
+  - **Maturities (3):** 30, 60, 90 days
+  - **Option types (2):** Calls and Puts
+- For HKM: Collapse to **18 portfolios** by averaging across maturities
 
 ---
 
-### **Weighting and Construction**
-- **Weighting Kernel**:
-  - Bivariate Gaussian kernel on moneyness and days to maturity  
-  - Bandwidths: 0.0125 (moneyness), 10 days (maturity)  
-  - Options with weights < 1% are dropped
-- **Normalization**:
-  - Weights are normalized to sum to 1  
-  - Recomputed daily
+## Step 4: Compute Option Returns (HKM Methodology)
+
+- **Daily return:** Use midpoint of bid and ask
+- **Leverage adjustment:** Scale to β = 1 using Black-Scholes elasticity:
+  - Call: ∂C/∂S × S/C > 1  
+  - Put: ∂P/∂S × S/P < -1
+- **Capital allocation:** Hold fractional options; remainder in risk-free asset
 
 ---
 
-### **Return Calculation**
-- **Return Basis**:
-  - One-day arithmetic return based on midpoint of bid-ask
-- **Leverage Adjustment**:
-  - Portfolios are adjusted to unit market beta (β = 1) daily using Black-Scholes elasticity:  
-    - Call elasticity: ∂C/∂S × S/C > 1  
-    - Put elasticity: ∂P/∂S × S/P < –1  
-  - This results in holding fractional option positions and investing the rest in the risk-free asset
-- **Final Return Series**:
-  - Daily leverage-adjusted returns are compounded into monthly returns
+## Step 5: Cleaning and Weighting
+
+- Exclude options with:
+  - Invalid or extreme implied vols
+  - Missing return inputs (unless interpolated)
+- No kernel smoothing (unlike CJS)
+- If data missing:
+  - Interpolate IV or carry forward price
+  - Rescale portfolio weights to preserve capital
 
 ---
 
-### **Robustness and Treatment of Missing Data**
-- **Handling Missing Options**:
-  - If quote is unavailable:
-    - Use unfiltered data if possible  
-    - Use payoff at expiry if expiration is imminent  
-    - Otherwise, interpolate using a surface fit to implied volatility
-  - During missing periods, options are held at purchase price and weights rescaled to maintain portfolio integrity
+## Step 6: Return Aggregation
+
+- **Daily to Monthly:** Compound daily β-adjusted returns
+- **Per Portfolio:** Maintain separate return series for each defined portfolio
 
 ---
 
-### **Statistical Rationale**
-- This process significantly reduces skewness and kurtosis, enabling:
-  - Application of linear factor pricing models  
-  - Direct comparison with models using Fama-French 25 portfolios
+## Step 7: Final Dataset Structure
 
+- **Panel format:**
+  - **Rows:** Date × Portfolio ID
+  - **Columns:** Return, moneyness, maturity, option type, elasticity, leverage-adjusted return
 
+---
 
+## Step 8: Downstream Usage
 
+- Ready for:
+  - Fama-MacBeth regressions
+  - Intermediary factor model testing
+  - Cross-asset comparison (if combining with HKM asset set)
+
+---
+
+## Notes on Robustness
+
+- Filtration + elasticity adjustment yields cleaner return series
+- Design enables beta normalization across option portfolios
+- Reduced skewness and kurtosis allows use of linear factor pricing models
