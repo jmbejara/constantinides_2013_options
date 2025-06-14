@@ -297,6 +297,11 @@ def calc_option_elasticity(delta, option_price, underlying_price, option_type='c
 
 
 
+def calc_option_delta(S, K, T, r, sigma):
+    # calculate delta of a European call option using Black-Scholes-Merton model
+    d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
+    delta = norm_cdf(d1)
+    return delta
 
 
 if __name__=='__main__':
