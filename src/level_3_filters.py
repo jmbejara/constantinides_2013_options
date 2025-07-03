@@ -309,7 +309,7 @@ def iv_filter_outliers(l2_data, iv_distance_method, iv_outlier_threshold):
     l2_data['rel_distance_iv'] = calc_relative_distance(l2_data['log_iv'], l2_data['fitted_iv'], method=iv_distance_method)
 
     # Define moneyness bins
-    bins = np.arange(0.8, 1.21, 0.05)
+    bins = np.arange(0.875, 1.125, 0.025)
     l2_data['moneyness_bin'] = pd.cut(l2_data['moneyness'], bins=bins)
 
     # Compute standard deviation of relative distances within each moneyness bin
