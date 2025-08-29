@@ -390,313 +390,114 @@ def calc_relative_distance_stats(l3_data_iv_only, date_range):
 
 
 ###### CHARTS ######
-def build_l2_data_chart(l2_data, date_range):
-    """
-    Builds a chart to visualize the level 2 filtered data.
 
-    Parameters:
-    l2_data (DataFrame): The level 2 filtered data.
-    date_range (str): The date range for the chart.
+def _get_col(df, col):
+    if col in df.columns:
+        return df[col]
+    if isinstance(df.columns, pd.MultiIndex):
+        if col in df.columns.get_level_values(-1):
+            return df.xs(col, axis=1, level=-1)
+    if col in df.index.names:
+        return df.index.get_level_values(col)
+    raise KeyError(f"{col} not found in DataFrame or index levels")
 
-    Returns:
-    None
-    """
+def _plot_distribution(ax, df, col, color, title):
+    series = _get_col(df, col).dropna()
+    ax.hist(series.values, bins=250, color=color)
+    ax.set_title(title)
+    ax.set_xlabel(col)
+    ax.set_ylabel('Frequency')
+    ax.grid()
 
-    fig, ax = plt.subplots(2,3, figsize=(12,8))
-    ax[0,0].hist(l2_data['IV'], bins=250, color='darkblue')
-    ax[0,0].set_xlabel('IV')
-    ax[0,0].set_ylabel('Frequency')
-    ax[0,0].set_title('Distribution of IV')
-    ax[0,0].grid()
+def _plot_logiv_vs_moneyness(ax, df, sample_size):
+    moneyness = _get_col(df, 'moneyness')
+    log_iv = _get_col(df, 'log_iv')
+    xy = pd.DataFrame({'moneyness': moneyness, 'log_iv': log_iv}).dropna()
+    if len(xy) > sample_size:
+        xy = xy.sample(sample_size, random_state=0)
+    ax.scatter(xy['moneyness'], xy['log_iv'], alpha=0.1, color='purple')
+    ax.set_title('log(IV) vs Moneyness')
+    ax.set_xlabel('Moneyness')
+    ax.set_ylabel('log(IV)')
+    ax.grid()
 
-    ax[0,1].hist(l2_data['log_iv'], bins=250, color='grey')
-    ax[0,1].set_xlabel('log(IV)')
-    ax[0,1].set_ylabel('Frequency')
-    ax[0,1].set_title('Distribution of log(IV)')
-    ax[0,1].grid()
+def _plot_iv_vs_moneyness(ax, df, cp_flag, sample_size):
+    moneyness = _get_col(df, 'moneyness')
+    iv = _get_col(df, 'IV')
+    cp = _get_col(df, 'cp_flag')
+    mask = (cp == cp_flag) & iv.notna() & moneyness.notna()
+    data = pd.DataFrame({'moneyness': moneyness[mask], 'IV': iv[mask]})
+    if len(data) > sample_size:
+        seed = 1 if cp_flag == 'C' else 2
+        data = data.sample(sample_size, random_state=seed)
+    color = 'blue' if cp_flag == 'C' else 'red'
+    ax.scatter(data['moneyness'], data['IV'], alpha=0.1, color=color)
+    ax.set_title(f"IV vs Moneyness ({'Calls' if cp_flag == 'C' else 'Puts'})")
+    ax.set_xlabel('Moneyness')
+    ax.set_ylabel('IV')
+    ax.grid()
 
-    l2_data = l2_data.set_index(['date', 'exdate', 'cp_flag'])
-    # IV curves for calls and puts, prior to level 3 filters
-    ax[1,0].scatter(x=l2_data.xs('C', level='cp_flag')['moneyness'], y=np.exp(l2_data.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
-    ax[1,0].set_xlabel('Moneyness')
-    ax[1,0].set_ylabel('IV')
-    ax[1,0].set_title('IV vs Moneyness (Calls)')
+def _plot_fitted_vs_logiv(ax, df, sample_size):
+    if 'fitted_iv' not in df.columns:
+        ax.axis('off')
+        return
+    log_iv = _get_col(df, 'log_iv')
+    fitted = _get_col(df, 'fitted_iv')
+    xy = pd.DataFrame({'log_iv': log_iv, 'fitted_iv': fitted}).dropna()
+    if len(xy) > sample_size:
+        xy = xy.sample(sample_size, random_state=3)
+    ax.scatter(xy['log_iv'], xy['fitted_iv'], alpha=0.1, color='darkgreen')
+    min_val, max_val = xy['log_iv'].min(), xy['log_iv'].max()
+    ax.plot([min_val, max_val], [min_val, max_val], linestyle='--', color='red')
+    ax.set_title('Fitted log(IV) vs Observed log(IV)')
+    ax.set_xlabel('log(IV)')
+    ax.set_ylabel('Fitted log(IV)')
+    ax.grid()
 
-    ax[1,1].scatter(x=l2_data.xs('P', level='cp_flag')['moneyness'], y=np.exp(l2_data.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
-    ax[1,1].set_xlabel('Moneyness')
-    ax[1,1].set_ylabel('IV')
-    ax[1,1].set_title('IV vs Moneyness (Puts)')
-    
-    # options with nan implied volatility
-    l2_data = l2_data.reset_index()
-    # calls only
-    nan_iv_calls = l2_data[(l2_data['cp_flag'] == 'C') & (l2_data['IV'].isna())]
-    # puts only
-    nan_iv_puts = l2_data[(l2_data['cp_flag'] == 'P') & (l2_data['IV'].isna())]
-    
-    if len(nan_iv_calls)==0 and len(nan_iv_puts)==0:
-        print(" |-- IV filter: No NaN IV records for calls or puts in L2 data")
-        ax[0,2].axis('off')
-        ax[1,2].axis('off')
-        
-    else:
-        ax[0,2].scatter(x=nan_iv_calls['date'], y=nan_iv_calls['moneyness'], color='blue', alpha=0.1, s=10, label='Calls')
-        ax[0,2].scatter(x=nan_iv_puts['date'], y=nan_iv_puts['moneyness'], color='red', alpha=0.1, s=10, label='Puts')
+def _build_iv_chart(df, date_range, level_tag, title_prefix, sample_size=50000):
+    df = df.copy()
+    if 'log_iv' not in df.columns:
+        iv = _get_col(df, 'IV')
+        df['log_iv'] = np.log(iv.where(iv > 0))
 
-        ax[0,2].set_xlabel('Trade Date')
-        ax[0,2].set_ylabel('Moneyness')
-        ax[0,2].set_title('Moneyness of Calls with NaN IV')
-        ax[0,2].grid()
-        ax[0,2].legend()
-        ax[0,2].grid()
+    fig, ax = plt.subplots(2, 3, figsize=(12, 8))
+    _plot_distribution(ax[0, 0], df, 'IV', 'darkblue', 'Distribution of IV')
+    _plot_distribution(ax[0, 1], df, 'log_iv', 'grey', 'Distribution of log(IV)')
+    _plot_logiv_vs_moneyness(ax[0, 2], df, sample_size)
+    _plot_iv_vs_moneyness(ax[1, 0], df, 'C', sample_size)
+    _plot_iv_vs_moneyness(ax[1, 1], df, 'P', sample_size)
+    _plot_fitted_vs_logiv(ax[1, 2], df, sample_size)
 
-        # percentage of NaN IV
-        nan_percentage = l2_data.groupby(['date', 'cp_flag'])['IV'].apply(lambda x: (x.isna().sum() / len(x))*100)
-
-        # calls only
-        nan_percentage_calls = nan_percentage[nan_percentage.index.get_level_values(1)=='C']
-        ax[1,2].scatter(x=nan_percentage_calls.index.get_level_values(0), y=nan_percentage_calls.values, color='blue', alpha = 0.1, s=10, label='Calls')
-
-        # puts only
-        nan_percentage_puts = nan_percentage[nan_percentage.index.get_level_values(1)=='P']
-        ax[1,2].scatter(x=nan_percentage_puts.index.get_level_values(0), y=nan_percentage_puts.values, color='red', alpha = 0.1, s=10, label='Puts')
-
-        ax[1,2].set_xlabel('Trade Date')
-        ax[1,2].set_ylabel('Percentage of NaN IV')
-        ax[1,2].set_title('Percentage of NaN IV by Trade Date')
-        ax[1,2].legend()
-        ax[1,2].grid()
-    
-    plt.suptitle(f'Level 2 Data (Before L3 Filters): {date_range.replace("_", " to ")}')
+    fig.suptitle(f'{title_prefix}: {date_range.replace("_", " to ")}')
     plt.tight_layout()
-    # plt.show()
-    
-    # fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig1_post_L2filter.svg')
+    filename = f'{level_tag}_{date_range}_iv_summary.png'
     try:
-        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig1_post_L2filter.png')
+        fig.savefig(OUTPUT_DIR / filename)
     except FileNotFoundError:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig1_post_L2filter.png')
-        
-    # fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig1_post_L2filter.pdf')
-    
-    
-def build_l2_fitted_iv_chart(l2_data, date_range):
-    """
-    Builds a Level 2 Fitted IV Chart using the given l2_data and date_range.
+        fig.savefig(OUTPUT_DIR / filename)
 
-    Parameters:
-    l2_data (DataFrame): The Level 2 data containing the necessary columns.
-    date_range (str): The date range for the chart title.
-
-    Returns:
-    None
-    """
-
-    fig, ax = plt.subplots(2,3, figsize=(12,8))
-
-    ax[0,0].hist(l2_data['IV'], bins=250, color='darkblue')
-    ax[0,0].set_xlabel('IV')
-    ax[0,0].set_ylabel('Frequency')
-    ax[0,0].set_title('Distribution of IV')
-    ax[0,0].grid()
-
-    ax[0,1].hist(l2_data['log_iv'], bins=250, color='grey')
-    ax[0,1].set_xlabel('log(IV)')
-    ax[0,1].set_ylabel('Frequency')
-    ax[0,1].set_title('Distribution of log(IV)')
-    ax[0,1].grid()
-
-    # Scatter plot of IV vs fitted IV
-    ax[0,2].scatter(x=l2_data['log_iv'], y=l2_data['fitted_iv'], color='darkblue', alpha=0.1)
-    ax[0,2].set_xlabel('log(IV)')
-    ax[0,2].set_ylabel('Fitted log(IV)')
-    ax[0,2].set_title('Fitted log(IV) vs  Observed log(IV)')
-    # Add 45-deg line
-    ax[0,2].plot([min(l2_data['log_iv']), max(l2_data['log_iv'])], [min(l2_data['log_iv']), max(l2_data['log_iv'])], color='red', linestyle='--')
-    ax[0,2].grid()
-
-
-    ax[1,0].scatter(x=l2_data.xs('C', level='cp_flag')['moneyness'], y=np.exp(l2_data.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
-    ax[1,0].set_xlabel('Moneyness')
-    ax[1,0].set_ylabel('IV')
-    ax[1,0].set_title('IV vs Moneyness (Calls)')
-
-    ax[1,1].scatter(x=l2_data.xs('P', level='cp_flag')['moneyness'], y=np.exp(l2_data.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
-    ax[1,1].set_xlabel('Moneyness')
-    ax[1,1].set_ylabel('IV')
-    ax[1,1].set_title('IV vs Moneyness (Puts)')
-
-    # Hide ax[1,2]
-    ax[1,2].axis('off')
-
-    plt.suptitle(f'Level 2 Filtered Data with Fitted IVs: {date_range.replace("_", " to ")}')
-    plt.tight_layout()
-    # plt.show()
-    
-    #fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig2_L2fitted_iv.svg')
-    try:
-        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig2_L2fitted_iv.png')
-    except FileNotFoundError:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig2_L2fitted_iv.png')
-    # fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig2_L2fitted_iv.pdf')
+    plt.show()
     
 
-def build_l3_data_iv_only_chart(l3_data_iv_only, date_range):
-    """
-    Build a chart with multiple subplots to visualize the distribution and relationships of IV data.
+# === Public Functions ===
+def build_raw_iv_chart(df, date_range, sample_size=50000):
+    _build_iv_chart(df, date_range, level_tag='RAW', title_prefix='Raw Options Data', sample_size=sample_size)
 
-    Parameters:
-    l3_data_iv_only (DataFrame): DataFrame containing IV data.
-    date_range (str): Date range for the chart title.
+def build_l1_iv_chart(df, date_range, sample_size=50000):
+    _build_iv_chart(df, date_range, level_tag='L1', title_prefix='Level 1 Filtered Data', sample_size=sample_size)
 
-    Returns:
-    None
-    """
+def build_l2_iv_chart(df, date_range, sample_size=50000):
+    _build_iv_chart(df, date_range, level_tag='L2', title_prefix='Level 2 IV-Filtered Data', sample_size=sample_size)
 
-    fig, ax = plt.subplots(3,3, figsize=(12,12))
+def build_l3_iv_chart(df, date_range, sample_size=50000):
+    _build_iv_chart(df, date_range, level_tag='L3_IV', title_prefix='Level 3 IV-Filtered Data', sample_size=sample_size)
 
-    ax[0,0].hist(l3_data_iv_only['IV'], bins=250, color='darkblue')
-    ax[0,0].set_xlabel('IV')
-    ax[0,0].set_ylabel('Frequency')
-    ax[0,0].set_title('Distribution of IV')
-    ax[0,0].grid()
-
-    ax[0,1].hist(l3_data_iv_only['log_iv'], bins=250, color='grey')
-    ax[0,1].set_xlabel('log(IV)')
-    ax[0,1].set_ylabel('Frequency')
-    ax[0,1].set_title('Distribution of log(IV)')
-    ax[0,1].grid()
-
-    # Scatter plot with x=log_iv and y=fitted_iv
-    ax[0,2].scatter(x=l3_data_iv_only['log_iv'], y=l3_data_iv_only['fitted_iv'], color='darkblue', alpha=0.1)
-    ax[0,2].set_xlabel('log(IV)')
-    ax[0,2].set_ylabel('Fitted log(IV)')
-    ax[0,2].set_title('log(IV) vs Fitted log(IV)')
-    # Add a 45-degree line
-    ax[0,2].plot([min(l3_data_iv_only['log_iv']), max(l3_data_iv_only['log_iv'])], [min(l3_data_iv_only['log_iv']), max(l3_data_iv_only['log_iv'])], color='red', linestyle='--')
-    ax[0,2].grid()
-
-
-    ax[1,0].scatter(x=l3_data_iv_only.xs('C', level='cp_flag')['moneyness'], y=np.exp(l3_data_iv_only.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
-    ax[1,0].set_xlabel('Moneyness')
-    ax[1,0].set_ylabel('IV')
-    ax[1,0].set_title('IV vs Moneyness (Calls)')
-
-    ax[1,1].scatter(x=l3_data_iv_only.xs('P', level='cp_flag')['moneyness'], y=np.exp(l3_data_iv_only.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
-    ax[1,1].set_xlabel('Moneyness')
-    ax[1,1].set_ylabel('IV')
-    ax[1,1].set_title('IV vs Moneyness (Puts)')
-
-
-    ax[2,0].scatter(x=l3_data_iv_only.xs('C', level='cp_flag')['moneyness'], y=l3_data_iv_only.xs('C', level='cp_flag')['rel_distance_iv'], color='blue', alpha=0.1, label='Calls')
-    ax[2,0].set_xlabel('Moneyness')
-    ax[2,0].set_ylabel('Relative Distance %')
-    ax[2,0].set_title('Rel. Distance of logIV-fitted IV vs moneyness (Calls)')
-    ax[2,0].grid()
-
-    ax[2,1].scatter(x=l3_data_iv_only.xs('P', level='cp_flag')['moneyness'], y=l3_data_iv_only.xs('P', level='cp_flag')['rel_distance_iv'], color='red', alpha=0.1, label='Puts')
-    ax[2,1].set_xlabel('Moneyness')
-    ax[2,1].set_ylabel('Relative Distance %')
-    ax[2,1].set_title('Rel. Distance of logIV-fitted IV vs moneyness (Puts)')
-    ax[2,1].grid()
-
-    # hide unused subplots
-    ax[1,2].axis('off')
-    ax[2,2].axis('off')
-
-    plt.suptitle(f'Level 3 Filtered Data: IV Filter Only: {date_range.replace("_", " to ")}')
-    plt.tight_layout()
-    # plt.show()
-    
-    #fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig3_IV_filter_only.svg')
-    try:
-        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig3_IV_filter_only.png')
-    except FileNotFoundError:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig3_IV_filter_only.png')
-    # fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig3_IV_filter_only.pdf')
+def build_l3_iv_pcp_chart(df, date_range, sample_size=50000):
+    _build_iv_chart(df, date_range, level_tag='L3_IV_PCP', title_prefix='Level 3 IV + PCP Filtered Data', sample_size=sample_size)
 
 
 
-def build_l3_data_iv_pcp_chart(l3_filtered_options, date_range):
-    """
-    Builds a chart displaying various distributions and scatter plots based on Level 3 filtered options data.
-
-    Parameters:
-    l3_filtered_options (DataFrame): The Level 3 filtered options data.
-    date_range (str): The date range for the chart.
-
-    Returns:
-    None
-    """
-
-    fig, ax = plt.subplots(3,3, figsize=(12,12))
-
-    chart_data = l3_filtered_options.reset_index().set_index(['date', 'exdate', 'cp_flag'])
-
-    ax[0,0].hist(chart_data['IV'], bins=250, color='darkblue')
-    ax[0,0].set_xlabel('IV')
-    ax[0,0].set_ylabel('Frequency')
-    ax[0,0].set_title('Distribution of IV')
-    ax[0,0].grid()
-
-    ax[0,1].hist(chart_data['log_iv'], bins=250, color='grey')
-    ax[0,1].set_xlabel('log(IV)')
-    ax[0,1].set_ylabel('Frequency')
-    ax[0,1].set_title('Distribution of log(IV)')
-    ax[0,1].grid()
-
-    # Scatter plot with x=log_iv and y=fitted_iv
-    ax[0,2].scatter(x=chart_data['log_iv'], y=chart_data['fitted_iv'], color='darkblue', alpha=0.1)
-    ax[0,2].set_xlabel('log(IV)')
-    ax[0,2].set_ylabel('Fitted log(IV)')
-    ax[0,2].set_title('log(IV) vs Fitted log(IV)')
-    # Add a 45-degree line
-    ax[0,2].plot([min(chart_data['log_iv']), max(chart_data['log_iv'])], [min(chart_data['log_iv']), max(chart_data['log_iv'])], color='red', linestyle='--')
-    ax[0,2].grid()
-
-
-    ax[1,0].scatter(x=chart_data.xs('C', level='cp_flag')['moneyness'], y=np.exp(chart_data.xs('C', level='cp_flag')['log_iv']), color='blue', alpha=0.1, label='IV')
-    ax[1,0].set_xlabel('Moneyness')
-    ax[1,0].set_ylabel('IV')
-    ax[1,0].set_title('IV vs Moneyness (Calls)')
-
-    ax[1,1].scatter(x=chart_data.xs('P', level='cp_flag')['moneyness'], y=np.exp(chart_data.xs('P', level='cp_flag')['log_iv']), color='red', alpha=0.1, label='IV')
-    ax[1,1].set_xlabel('Moneyness')
-    ax[1,1].set_ylabel('IV')
-    ax[1,1].set_title('IV vs Moneyness (Puts)')
-
-
-    ax[2,0].scatter(x=chart_data.xs('C', level='cp_flag')['moneyness'], y=chart_data.xs('C', level='cp_flag')['rel_distance_iv'], color='blue', alpha=0.1, label='Calls')
-    ax[2,0].set_xlabel('Moneyness')
-    ax[2,0].set_ylabel('Relative Distance %')
-    ax[2,0].set_title('Rel. Distance of logIV-fitted IV vs moneyness (Calls)')
-    ax[2,0].grid()
-
-    ax[2,1].scatter(x=chart_data.xs('P', level='cp_flag')['moneyness'], y=chart_data.xs('P', level='cp_flag')['rel_distance_iv'], color='red', alpha=0.1, label='Puts')
-    ax[2,1].set_xlabel('Moneyness')
-    ax[2,1].set_ylabel('Relative Distance %')
-    ax[2,1].set_title('Rel. Distance of logIV-fitted IV vs moneyness (Puts)')
-    ax[2,1].grid()
-
-    # hide unused subplots
-    ax[1,2].axis('off')
-    ax[2,2].axis('off')
-
-    plt.suptitle(f'Level 3 Filtered Data: IV+Put-Call Parity Filters: {date_range.replace("_", " to ")}')
-    plt.tight_layout()
-    # plt.show()
-    
-    #fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig4_IV_and_PCP.svg')
-    try:
-        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig4_IV_and_PCP.png')
-    except FileNotFoundError:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig4_IV_and_PCP.png')
-        
-    # fig.savefig(OUTPUT_DIR / f'L3_{date_range}_fig4_IV_and_PCP.pdf')
 
 
 def get_filepaths(date_range):
@@ -776,49 +577,29 @@ def compare_to_optionmetrics(l2_data, l3_data_iv_only, l3_filtered_options, date
 
 def IV_filter(l2_data, date_range):
     """
-    Apply IV filter to the option data.
-
-    Parameters:
-    - _df: Placeholder parameter, not used in the function.
-    - date_range (str): Date range for filtering the option data.
-
-    Returns:
-    - l3_data_iv_only (DataFrame): IV-filtered option data.
-
+    Applies log(IV), fits quadratic curve, filters IV outliers.
+    Returns both intermediate (L2 with fitted IV) and final (L3) datasets.
     """
     print(' \n>> Running IV filter...')
-    
-    # calc log IV 
+
+    # Step 1: Ensure log(IV)
     l2_data['log_iv'] = np.log(l2_data['IV'])
-    
-    print(' |-- IV filter: L2 data loaded, building pre-L3 filter charts...')
-    build_l2_data_chart(l2_data, date_range)
-    nan_iv_summary = nan_iv_in_l2_data(l2_data, date_range)
-    nan_iv_summary.to_latex(OUTPUT_DIR / f'L3_{date_range}_nan_ivs_in_L2_data.tex')
-    
+
+    # Step 2: Fit quadratic IV model and append fitted IV
     print(' |-- IV filter: applying quadratic fit...')
     l2_data = apply_quadratic_iv_fit(l2_data)
-    
-    print(' |-- IV filter: building fitted IV charts...')
-    build_l2_fitted_iv_chart(l2_data, date_range)
-    
+
+    # Step 3: Filter outliers to produce Level 3
     print(' |-- IV filter: filtering outliers...')
     l3_data_iv_only = iv_filter_outliers(l2_data, 'percent', 2.0)
-    # convert moneyness_bin to string to save
     l3_data_iv_only['moneyness_bin'] = l3_data_iv_only['moneyness_bin'].astype(str)
-    
+
+    # Step 4: Save filtered output
     print(' |-- IV filter: saving L3 IV-filtered data...')
     l3_data_iv_only.to_parquet(DATA_DIR / f'L3_IV_filter_only_{date_range}.parquet')
-    
-    print(' |-- IV filter: building L3 IV-filtered charts...')
-    build_l3_data_iv_only_chart(l3_data_iv_only, date_range)
-    print(' |-- IV filter complete.')    
-    
-    # compare to optionmetrics
-    # global final_result_compare
-    # final_result_compare = partial(compare_to_optionmetrics, l2_data=l2_data, l3_data_iv_only=l3_data_iv_only, date_range=date_range)
-    
-    return l3_data_iv_only
+
+    return l2_data, l3_data_iv_only
+
 
 
 
@@ -876,7 +657,8 @@ def put_call_filter(df, date_range):
     
     # build chart
     print(' |-- PCP filter: building L3 final filtered options chart...')
-    build_l3_data_iv_pcp_chart(l3_filtered_options, date_range)
+    l3_filtered_options['log_iv'] = np.log(l3_filtered_options['IV'].where(l3_filtered_options['IV'] > 0))
+    #build_l3_data_iv_pcp_chart(l3_filtered_options, date_range)
     print(' |-- PCP filter complete.')
     
     # # compare to optionmetrics
