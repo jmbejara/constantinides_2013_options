@@ -485,16 +485,16 @@ def build_raw_iv_chart(df, date_range, sample_size=50000):
     _build_iv_chart(df, date_range, level_tag='RAW', title_prefix='Raw Options Data', sample_size=sample_size)
 
 def build_l1_iv_chart(df, date_range, sample_size=50000):
-    _build_iv_chart(df, date_range, level_tag='L1', title_prefix='Level 1 Filtered Data', sample_size=sample_size)
+    _build_iv_chart(df, date_range, level_tag='L1', title_prefix='Data after Level 1 Filtering', sample_size=sample_size)
 
 def build_l2_iv_chart(df, date_range, sample_size=50000):
-    _build_iv_chart(df, date_range, level_tag='L2', title_prefix='Level 2 IV-Filtered Data', sample_size=sample_size)
+    _build_iv_chart(df, date_range, level_tag='L2', title_prefix='Data after Level 2 Filtering', sample_size=sample_size)
 
 def build_l3_iv_chart(df, date_range, sample_size=50000):
-    _build_iv_chart(df, date_range, level_tag='L3_IV', title_prefix='Level 3 IV-Filtered Data', sample_size=sample_size)
+    _build_iv_chart(df, date_range, level_tag='L3_IV', title_prefix='Data after Level 3 IV Filtering Only', sample_size=sample_size)
 
 def build_l3_iv_pcp_chart(df, date_range, sample_size=50000):
-    _build_iv_chart(df, date_range, level_tag='L3_IV_PCP', title_prefix='Level 3 IV + PCP Filtered Data', sample_size=sample_size)
+    _build_iv_chart(df, date_range, level_tag='L3_IV_PCP', title_prefix='Data after Level 3 IV + Put-Call Parity Filtering', sample_size=sample_size)
 
 
 
